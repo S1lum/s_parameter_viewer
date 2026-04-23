@@ -840,10 +840,11 @@ function parseCSV(text) {
     if (c.length < 11) continue;
     const f1 = +c[0], f2 = +c[7];
     const v11=+c[1], v22=+c[3], v33=+c[8], v44=+c[10];
-    if (!isNaN(f1)&&!isNaN(v11)) S11.push({x:f1/1e9,y:v11});
-    if (!isNaN(f1)&&!isNaN(v22)) S22.push({x:f1/1e9,y:v22});
-    if (!isNaN(f2)&&!isNaN(v33)) S33.push({x:f2/1e9,y:v33});
-    if (!isNaN(f2)&&!isNaN(v44)) S44.push({x:f2/1e9,y:v44});
+    // store x in MHz (integers) to avoid float precision issues
+    if (!isNaN(f1)&&!isNaN(v11)) S11.push({x: Math.round(f1/1e6), y:v11});
+    if (!isNaN(f1)&&!isNaN(v22)) S22.push({x: Math.round(f1/1e6), y:v22});
+    if (!isNaN(f2)&&!isNaN(v33)) S33.push({x: Math.round(f2/1e6), y:v33});
+    if (!isNaN(f2)&&!isNaN(v44)) S44.push({x: Math.round(f2/1e6), y:v44});
   }
   return {S11,S22,S33,S44};
 }
@@ -859,6 +860,7 @@ function chartOpts(param) {
   const gridCol    = light ? 'rgba(150,190,220,0.45)' : 'rgba(255,255,255,0.07)';
   const borderCol  = light ? '#aac4d8'         : '#2a3a48';
   const tickCol    = light ? '#445566'         : '#5a7a90';
+  const dimCol     = light ? '#8fa3b8'         : '#3a5060';
   const titleCol   = light ? '#445566'         : '#4a6070';
   const ttBg       = light ? '#ffffff'         : '#0d1117';
   const ttBorder   = light ? '#c0d4e4'         : '#1e2a35';
@@ -881,7 +883,7 @@ function chartOpts(param) {
         backgroundColor: ttBg, borderColor: ttBorder, borderWidth:1,
         titleColor: ttTitle, bodyColor: ttBody, padding:10,
         callbacks: {
-          title: items => items[0].parsed.x.toFixed(4)+' GHz',
+          title: items => items[0].parsed.x.toFixed(0)+' MHz',
           label: item => '  '+item.dataset.label+':  '+item.parsed.y.toFixed(3)+' dB',
         }
       },
@@ -894,43 +896,33 @@ function chartOpts(param) {
         border: { color: borderCol, width: 1 },
         grid: {
           color: gridCol,
-          lineWidth: ctx => {
-            const mhz = Math.round(ctx.tick.value * 1000);
-            return mhz % 500 === 0 ? 1.2 : mhz % 100 === 0 ? 0.8 : 0.4;
-          },
+          lineWidth: ctx => (ctx.tick.value % 500 === 0 ? 1.2 : ctx.tick.value % 100 === 0 ? 0.8 : 0.4),
           drawTicks: true,
           tickLength: 4,
           tickColor: borderCol,
         },
         ticks: {
-          stepSize: 0.05,
-          color: 'transparent',
-          font: { size: 10, family: "'IBM Plex Mono', monospace" },
-          padding: 18,
+          stepSize: 50,
+          color: tickCol,
           maxRotation: 0,
           autoSkip: false,
           callback(v) {
-            const mhz = Math.round(v * 1000);
-            if (mhz % 50 !== 0) return null;
-            return '';   // keep tick marks but hide text (plugin draws it)
-          }
+            if (v % 500 === 0) return v + ' MHz';
+            if (v % 100 === 0) return v;
+            return '';
+          },
+          font: ctx => ({
+            size:   ctx.tick && ctx.tick.value % 500 === 0 ? 11 : 9,
+            weight: ctx.tick && ctx.tick.value % 500 === 0 ? '600' : '400',
+            family: "'IBM Plex Mono', monospace"
+          }),
+          color: ctx => {
+            if (!ctx.tick) return tickCol;
+            return ctx.tick.value % 500 === 0 ? tickCol : dimCol;
+          },
+          padding: 4,
         },
-        afterBuildTicks(axis) {
-          // Set individual font sizes per tick
-          axis.ticks.forEach(tick => {
-            const mhz = Math.round(tick.value * 1000);
-            tick._big = (mhz % 500 === 0);
-          });
-        },
-        afterTickToLabelConversion(axis) {
-          axis.ticks.forEach(tick => {
-            const mhz = Math.round(tick.value * 1000);
-            if (mhz % 500 === 0) {
-              tick.major = true;
-            }
-          });
-        },
-        title: { display:true, text:'f / MHz', color: titleCol, font:{ size:11, family:"'IBM Plex Mono', monospace" }, padding:{top:6} }
+        title: { display:true, text:'f / MHz', color: titleCol, font:{ size:11, family:"'IBM Plex Mono', monospace" }, padding:{top:4} }
       },
       y: {
         border: { color: borderCol, width: 1 },
@@ -954,37 +946,6 @@ function chartOpts(param) {
   };
 }
 
-// Custom plugin: two-tier x-axis font sizes (500 MHz = big, 100 MHz = small)
-const xTickFontPlugin = {
-  id: 'xTickFont',
-  afterDraw(chart) {
-    const xAxis = chart.scales.x;
-    if (!xAxis) return;
-    const { ctx } = chart;
-    ctx.save();
-    const light = document.documentElement.classList.contains('light');
-    const tickCol = light ? '#445566' : '#5a7a90';
-    const dimCol  = light ? '#7a96aa' : '#3a5060';
-    const y = xAxis.bottom + 4;
-
-    xAxis.ticks.forEach((tick, i) => {
-      const mhz = Math.round(tick.value * 1000);
-      if (mhz % 100 !== 0) return;
-      const x = xAxis.getPixelForValue(tick.value);
-      const is500 = mhz % 500 === 0;
-      ctx.font = is500
-        ? "600 11px 'IBM Plex Mono', monospace"
-        : "400 9px 'IBM Plex Mono', monospace";
-      ctx.fillStyle  = is500 ? tickCol : dimCol;
-      ctx.textAlign  = 'center';
-      ctx.textBaseline = 'top';
-      const label = is500 ? mhz + ' MHz' : String(mhz);
-      ctx.fillText(label, x, y);
-    });
-    ctx.restore();
-  }
-};
-Chart.register(xTickFontPlugin);
 const chartAreaBgPlugin = {
   id: 'chartAreaBg',
   beforeDraw(chart) {
@@ -1031,7 +992,7 @@ function renderCharts() {
       if (all.length) {
         const m = all.reduce((a,b) => b.y<a.y?b:a);
         chip.style.display = 'block';
-        chip.querySelector('span').textContent = m.y.toFixed(2)+' dB @ '+m.x.toFixed(3)+' GHz';
+        chip.querySelector('span').textContent = m.y.toFixed(2)+' dB @ '+m.x.toFixed(0)+' MHz';
       }
     } else {
       chip.style.display = 'none';
@@ -1161,12 +1122,12 @@ function updateStatus() {
     const f = files[0];
     if (f.data.S11.length) {
       const d = f.data.S11;
-      document.getElementById('st-freq1').textContent = d[0].x.toFixed(2)+'–'+d[d.length-1].x.toFixed(2)+' GHz';
+      document.getElementById('st-freq1').textContent = d[0].x+' – '+d[d.length-1].x+' MHz';
       document.getElementById('st-pts').textContent = d.length;
     }
     if (f.data.S33.length) {
       const d = f.data.S33;
-      document.getElementById('st-freq2').textContent = d[0].x.toFixed(2)+'–'+d[d.length-1].x.toFixed(2)+' GHz';
+      document.getElementById('st-freq2').textContent = d[0].x+' – '+d[d.length-1].x+' MHz';
     }
   } else {
     ['st-freq1','st-freq2','st-pts'].forEach(id => document.getElementById(id).textContent='—');
